@@ -1,0 +1,604 @@
+{
+  "name": "NexaCore AI Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1120,
+        400
+      ],
+      "id": "2cc00c92-8e57-4088-8dbd-0cd778713f1d",
+      "name": "Embeddings OpenAI",
+      "credentials": {
+        "openAiApi": {
+          "id": "Rk995oocuF1wuqHa",
+          "name": "Nexacore"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Receive Customer Message').first().json.body.body.sender.id }}",
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        656,
+        144
+      ],
+      "id": "a6a380de-b97b-432e-98ea-b302e0b44a22",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chat-message",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        224,
+        -64
+      ],
+      "id": "c7a489cc-0f27-4367-8c67-71e59c15db7a",
+      "name": "Receive Customer Message",
+      "webhookId": "b0dc4baf-cd83-4c9d-aeb8-507c0ef20b24"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO conversation_status (conversation_id, status)\nVALUES ('{{ $json.body.sender.id }}', 'ai_active')\nON CONFLICT (conversation_id) DO NOTHING;\n\nSELECT status FROM conversation_status \nWHERE conversation_id = '{{ $json.body.sender.id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        448,
+        -64
+      ],
+      "id": "d5615adc-2c3e-4e27-b297-22d08f88bfb5",
+      "name": " Check Conversation Status",
+      "credentials": {
+        "postgres": {
+          "id": "tIK5HGkRtPyMPcHv",
+          "name": "Postgres Nexa"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "2217c2ff-92df-4508-8add-e43cac1eee33",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "ai_active",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        704,
+        -64
+      ],
+      "id": "62c4896b-5ef8-4fd6-bc37-144ded754f9d",
+      "name": "Is AI Active?"
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolDescription": "Use this to search the knowledge base",
+        "tableName": {
+          "__rl": true,
+          "value": "nexacore_knowledge_base",
+          "mode": "list",
+          "cachedResultName": "nexacore_knowledge_base"
+        },
+        "options": {
+          "queryName": "match_documents"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.3,
+      "position": [
+        784,
+        144
+      ],
+      "id": "69646594-0c45-4bc7-a77c-fe43c4a5a0a6",
+      "name": " Search Main Knowledge Base",
+      "credentials": {
+        "supabaseApi": {
+          "id": "RgNVhaaKVFKt46XA",
+          "name": "Supabase nexacore"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolDescription": "Search the AI self-generated knowledge base from previous conversations. This contains high-quality answers the AI has given before. Use this as a secondary source only when the main knowledge base (nexacore_knowledge_base) does not have enough relevant information.",
+        "tableName": {
+          "__rl": true,
+          "value": "nexacore_ai_generated",
+          "mode": "list",
+          "cachedResultName": "nexacore_ai_generated"
+        },
+        "topK": 10,
+        "options": {
+          "queryName": "match_documents_ai_generated"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.3,
+      "position": [
+        1088,
+        144
+      ],
+      "id": "521417b8-7bb5-4ec2-8797-9b76bfdda4f8",
+      "name": "Search AI-Generated Answers",
+      "credentials": {
+        "supabaseApi": {
+          "id": "RgNVhaaKVFKt46XA",
+          "name": "Supabase nexacore"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Receive Customer Message').first().json.body.body.message.text }}",
+        "options": {
+          "systemMessage": "You are Maya, NexaCore's friendly AI support assistant. You're warm, helpful, and professional — like a knowledgeable teammate who genuinely wants to help.\n\nYou have access to two knowledge sources:\n1. Main knowledge base (nexacore_knowledge_base) — trusted original documents. Always search this first.\n2. AI-generated knowledge base (nexacore_ai_generated) — high-quality answers from previous conversations. Use this only as a backup.\n\nAlways base your answers only on information retrieved from these two sources. Never make up information.\n\nWhen answering:\n- Be conversational and warm, not robotic\n- Give complete, helpful answers with all relevant details\n- Use simple language — avoid overly technical jargon\n- If steps are involved, list them clearly\n\nALWAYS search the knowledge base and answer directly for:\n- Payment issues (GCash, PayMaya, credit card, pending invoices)\n- Billing questions (invoices, receipts, VAT)\n- Technical troubleshooting (NexaDesk, NexaCRM, NexaBilling)\n- Product questions and features\n- Pricing and subscription plans\n- Onboarding and setup\n- Password reset and SSO issues\n- Support hours and contact information\n\nONLY escalate WITHOUT answering for these specific topics:\n- Contract negotiations\n- Custom enterprise pricing (outside published rates)\n- Legal requests (subpoenas, court orders)\n- Data breach reports\n- Account termination requests\n- Refund disputes (already decided by billing team)\n- Regulatory compliance audits\n- Executive escalations (when customer asks to speak to CEO, \n  founder, executive, or any named person like Tim, Daniel, \n  Sofia, or says they refuse to talk to AI and demand a human)\n- When customer is angry and explicitly demands a human agent\n- When customer says \"I don't want to talk to you\" or \n  \"send me a human\" or \"I want a real person\"\n\nIMPORTANT: For ALL escalation topics above — respond with a \nshort, warm, direct message to the customer then add \n\"I don't know\" hidden at the end on a new line.\n\nExample format:\n\"Thank you for reaching out! I've already forwarded your \nmessage to our specialist team and they'll get back to you \nshortly. Just give us a few minutes!\n\"I don't know\"\n\nKeep the warm message short, friendly, and direct. \nNo long explanations. No repeated apologies.\n\nIf you cannot find relevant information in both knowledge sources, respond with exactly: \nrespond with a short, warm, direct message to the customer then add \n\"I don't know\" hidden at the end on a new line. \"I don't know\""
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1024,
+        -80
+      ],
+      "id": "7724e551-847f-4f91-ae83-2d79656155a8",
+      "name": "Maya — AI Support Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        512,
+        144
+      ],
+      "id": "09f76dde-dcb1-40b2-ba0f-08b5dde64a3e",
+      "name": "GPT-4o-mini — Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "Rk995oocuF1wuqHa",
+          "name": "Nexacore"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "21d07e4e-c4b2-4fc0-b37f-b92de5927939",
+              "leftValue": "={{ $json.output }}",
+              "rightValue": "I don't know",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1408,
+        -80
+      ],
+      "id": "c82f3c32-bc89-4a26-8456-2c50fa8c373c",
+      "name": " Needs Human Support?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = $input.first().json.output;\nconst hasEscalation = output.includes(\"I don't know\");\nconst cleanMessage = output.replace(\"I don't know\", \"\").trim();\n\nreturn [{\n  json: {\n    output: output,\n    customer_message: hasEscalation ? cleanMessage : output,\n    has_escalation: hasEscalation\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1616,
+        -176
+      ],
+      "id": "ca94fd86-9a4b-42c8-af70-0a67163b8086",
+      "name": "Split Escalation Message"
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=🚨 Customer needs human support!\n\nCustomer ID: {{ $('Receive Customer Message').first().json.body.body.sender.id }}\nMessage: {{ $('Receive Customer Message').first().json.body.body.message.text }}\nAI Response sent: {{ $json.customer_message }}\n\n➡️ Reply on it/done {{ $('Receive Customer Message').first().json.body.body.sender.id }} on the Attention Bot\n\n",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1808,
+        -176
+      ],
+      "id": "9eec43a3-1bdb-4bcb-9f48-4bc8239eea0d",
+      "name": " Alert Human Support Team",
+      "webhookId": "c5fbf509-ab4a-43db-a2ab-05355579bd1b",
+      "credentials": {
+        "telegramApi": {
+          "id": "4jKtZ2c0fmKiT4zY",
+          "name": "CashTraker_Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "=={\n  \"message\": \"{{ $('Split Escalation Message').item.json.customer_message }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2048,
+        -176
+      ],
+      "id": "e6515746-3aa4-4c1d-9c40-0e42443ba078",
+      "name": " Send Escalation Message to Customer"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a87ce667-5277-48bc-849e-93b39dd9f4c3",
+              "name": "=output",
+              "value": "={{ $json.output }}",
+              "type": "string"
+            },
+            {
+              "id": "fda2d677-8ab7-413b-8794-52c21d418c37",
+              "name": "content_for_store",
+              "value": "=Original Question: \n{{ $('Receive Customer Message').first().json.body.body.message.text }}\n\nAI Answer: \n{{ $json.output }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1776,
+        16
+      ],
+      "id": "dde5ed19-dac3-4550-805e-33418e7c7819",
+      "name": "Format Q&A for Storage"
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "tableName": {
+          "__rl": true,
+          "value": "nexacore_ai_generated",
+          "mode": "list",
+          "cachedResultName": "nexacore_ai_generated"
+        },
+        "embeddingBatchSize": 1536,
+        "options": {
+          "queryName": "match_documents_ai_generated"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.3,
+      "position": [
+        2000,
+        16
+      ],
+      "id": "80e09cb9-8981-4419-b3de-e1e3f9374df9",
+      "name": " Save Answer to AI Knowledge Base",
+      "credentials": {
+        "supabaseApi": {
+          "id": "RgNVhaaKVFKt46XA",
+          "name": "Supabase nexacore"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "=={\n  \"message\": \"{{ $('Maya — AI Support Agent').item.json.output }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2336,
+        16
+      ],
+      "id": "6e62086f-3fb1-46df-a3be-5cddf28401e8",
+      "name": "Send AI Answer to Customer"
+    },
+    {
+      "parameters": {
+        "jsonMode": "expressionData",
+        "jsonData": "={{ $json.content_for_store }}",
+        "textSplittingMode": "custom",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        2080,
+        224
+      ],
+      "id": "3ac9e3e4-7cb8-433a-a77c-8bf9b102a4cd",
+      "name": "Load Answer for Embedding"
+    },
+    {
+      "parameters": {
+        "chunkOverlap": 100,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [
+        2176,
+        432
+      ],
+      "id": "2b212280-084f-4de2-b9b8-c8555f4a3adb",
+      "name": "Split Answer into Chunks"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Embeddings OpenAI": {
+      "ai_embedding": [
+        [
+          {
+            "node": " Search Main Knowledge Base",
+            "type": "ai_embedding",
+            "index": 0
+          },
+          {
+            "node": "Search AI-Generated Answers",
+            "type": "ai_embedding",
+            "index": 0
+          },
+          {
+            "node": " Save Answer to AI Knowledge Base",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Maya — AI Support Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Receive Customer Message": {
+      "main": [
+        [
+          {
+            "node": " Check Conversation Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    " Check Conversation Status": {
+      "main": [
+        [
+          {
+            "node": "Is AI Active?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is AI Active?": {
+      "main": [
+        [
+          {
+            "node": "Maya — AI Support Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    " Search Main Knowledge Base": {
+      "ai_tool": [
+        [
+          {
+            "node": "Maya — AI Support Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search AI-Generated Answers": {
+      "ai_tool": [
+        [
+          {
+            "node": "Maya — AI Support Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Maya — AI Support Agent": {
+      "main": [
+        [
+          {
+            "node": " Needs Human Support?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4o-mini — Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Maya — AI Support Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    " Needs Human Support?": {
+      "main": [
+        [
+          {
+            "node": "Split Escalation Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Q&A for Storage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Escalation Message": {
+      "main": [
+        [
+          {
+            "node": " Alert Human Support Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    " Alert Human Support Team": {
+      "main": [
+        [
+          {
+            "node": " Send Escalation Message to Customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Q&A for Storage": {
+      "main": [
+        [
+          {
+            "node": " Save Answer to AI Knowledge Base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    " Save Answer to AI Knowledge Base": {
+      "main": [
+        [
+          {
+            "node": "Send AI Answer to Customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Answer for Embedding": {
+      "ai_document": [
+        [
+          {
+            "node": " Save Answer to AI Knowledge Base",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Answer into Chunks": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Load Answer for Embedding",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "5fe48470-fe46-4b5a-8037-d949d231c4c5",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "YOUR_INSTANCE_ID"
+  },
+  "id": "SYfTdpLqDtJ14VYS",
+  "tags": []
+}
